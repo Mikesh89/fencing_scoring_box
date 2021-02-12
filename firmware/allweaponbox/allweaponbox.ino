@@ -3,7 +3,7 @@
 //  Desc:    Arduino Code to implement a fencing scoring apparatus           //
 //  Dev:     Wnew                                                            //
 //  Date:    Nov  2012                                                       //
-//  Updated: Sept 2015                                                       //
+//  Updated: Feb  2021                                                       //
 //  Notes:   1. Basis of algorithm from digitalwestie on github. Thanks Mate //
 //           2. Used uint8_t instead of int where possible to optimise       //
 //           3. Set ADC prescaler to 16 faster ADC reads                     //
@@ -12,7 +12,16 @@
 //           2. Implement short circuit LEDs (already provision for it)      //
 //           3. Set up debug levels correctly                                //
 //                                                                           //
+//  Updates to wnew and Tiebevn (Sept 2015):                                 //
+//           1. Changed to NeoPixel LED's connected to pin 6                //
+//           2. I bought passive buzzers so changed to analogWrite           //
+//                                                                           //
 //===========================================================================//
+
+//============
+// #includes
+//============
+#include <Adafruit_NeoPixel.h> //Required library for Neopixels
 
 //============
 // #defines
@@ -25,16 +34,19 @@
 #define BUZZERTIME  1000  // length of time the buzzer is kept on after a hit (ms)
 #define LIGHTTIME   3000  // length of time the lights are kept on after a hit (ms)
 #define BAUDRATE   57600  // baudrate of the serial debug interface
+#define NUMPIXELS      8  // Number of LEDs per set of scoring lights
 
 //============
 // Pin Setup
 //============
-const uint8_t shortLEDA  =  8;    // Short Circuit A Light
-const uint8_t onTargetA  =  9;    // On Target A Light
-const uint8_t offTargetA = 10;    // Off Target A Light
-const uint8_t offTargetB = 11;    // Off Target B Light
-const uint8_t onTargetB  = 12;    // On Target B Light
-const uint8_t shortLEDB  = 13;    // Short Circuit A Light
+const uint8_t LEDpin = 6; // All LED's connected to one pin
+//BELOW ARE THE OLD PINS
+//const uint8_t shortLEDA  =  8;    // Short Circuit A Light
+//const uint8_t onTargetA  =  9;    // On Target A Light
+//const uint8_t offTargetA = 10;    // Off Target A Light
+//const uint8_t offTargetB = 11;    // Off Target B Light
+//const uint8_t onTargetB  = 12;    // On Target B Light
+//const uint8_t shortLEDB  = 13;    // Short Circuit A Light
 
 const uint8_t groundPinA = A0;    // Ground A pin - Analog
 const uint8_t weaponPinA = A1;    // Weapon A pin - Analog
@@ -45,7 +57,9 @@ const uint8_t groundPinB = A5;    // Ground B pin - Analog
 
 const uint8_t modePin    =  2;        // Mode change button interrupt pin 0 (digital pin 2)
 const uint8_t buzzerPin  =  3;        // buzzer pin
-const uint8_t modeLeds[] = {4, 5, 6}; // LED pins to indicate weapon mode selected {f e s}
+//const uint8_t modeLeds[] = {4, 5, 6}; // LED pins to indicate weapon mode selected {f e s}
+
+Adafruit_NeoPixel pixels(NUMPIXELS, LEDpin, NEO_GRB + NEO_KHZ800); //Neopixels on LEDpin (6)
 
 //=========================
 // values of analog reads
@@ -117,20 +131,51 @@ void setup() {
 
    // add the interrupt to the mode pin (interrupt is pin 0)
    attachInterrupt(modePin-2, changeMode, FALLING);
-   pinMode(modeLeds[0], OUTPUT);
-   pinMode(modeLeds[1], OUTPUT);
-   pinMode(modeLeds[2], OUTPUT);
+   //pinMode(modeLeds[0], OUTPUT);
+   //pinMode(modeLeds[1], OUTPUT);
+   //pinMode(modeLeds[2], OUTPUT);
 
    // set the light pins to outputs
-   pinMode(offTargetA, OUTPUT);
-   pinMode(offTargetB, OUTPUT);
-   pinMode(onTargetA,  OUTPUT);
-   pinMode(onTargetB,  OUTPUT);
-   pinMode(shortLEDA,  OUTPUT);
-   pinMode(shortLEDB,  OUTPUT);
+   //pinMode(offTargetA, OUTPUT);
+   //pinMode(offTargetB, OUTPUT);
+   //pinMode(onTargetA,  OUTPUT);
+   //pinMode(onTargetB,  OUTPUT);
+   //pinMode(shortLEDA,  OUTPUT);
+   //pinMode(shortLEDB,  OUTPUT);
    pinMode(buzzerPin,  OUTPUT);
-
-   digitalWrite(modeLeds[currentMode], HIGH);
+   pixels.begin();
+   
+   // Use Neopixels to communicate mode
+   if      (currentMode == FOIL_MODE) {   
+      for(int i=0; i<NUMPIXELS; i++) {pixels.setPixelColor(i, pixels.Color(255, 255, 255));}
+   }   
+   else if (currentMode == EPEE_MODE) {
+      for(int i=0; i<NUMPIXELS; i++) {
+         if (i < NUMPIXELS / 2) {pixels.setPixelColor(i, pixels.Color(255, 0, 0));}
+         else {pixels.setPixelColor(i, pixels.Color(0, 255, 0));}
+      }
+   }   
+   else if (currentMode == SABRE_MODE) {     
+      for(int i=0; i<NUMPIXELS; i++) {
+         if (i < NUMPIXELS / 3) {pixels.setPixelColor(i, pixels.Color(255, 0, 0));}
+         else if (i < NUMPIXELS * 2 / 3) {pixels.setPixelColor(i, pixels.Color(0, 255, 0));}
+         else {pixels.setPixelColor(i, pixels.Color(0, 0, 255));}
+      }
+   }
+   pixels.show();
+   
+   analogWrite(buzzerPin, 127);
+   delay(BUZZERTIME);
+   analogWrite(buzzerPin, 0);
+   
+   delay(LIGHTTIME - BUZZERTIME);
+   for(int i=0; i<NUMPIXELS; i++) {
+      if (i < NUMPIXELS / 2) {pixels.setPixelColor(i, pixels.Color(1, 0, 0));}
+      else {pixels.setPixelColor(i, pixels.Color(0, 1, 0));}
+   }
+   pixels.show();
+   
+   //digitalWrite(modeLeds[currentMode], HIGH);
 
 #ifdef TEST_LIGHTS
    testLights();
@@ -221,24 +266,58 @@ void changeMode() {
 
 
 //============================
-// Sets the correct mode led
+// Used to sets the correct mode led
+// Now it uses the signal lights to show:
+//    o   Red and Green momentarily for a switch to epee
+//    o   White momentarily for a switch to foil
+//    o   Red, Green, and Blue momentarily for a switch to sabre
 //============================
 void setModeLeds() {
-   if (currentMode == FOIL_MODE) {
-      digitalWrite(onTargetA, HIGH);
-   } else {
-      if (currentMode == EPEE_MODE) {
-        digitalWrite(onTargetB, HIGH);
-      } else {
-         if (currentMode == SABRE_MODE){
-            digitalWrite(onTargetA, HIGH);
-            digitalWrite(onTargetB, HIGH);
-         }
+   if      (currentMode == FOIL_MODE) {
+      for(int i=0; i<NUMPIXELS; i++) {pixels.setPixelColor(i, pixels.Color(255, 255, 255));}
+   }
+   else if (currentMode == EPEE_MODE) {
+      for(int i=0; i<NUMPIXELS; i++) {
+         if (i < NUMPIXELS / 2) {pixels.setPixelColor(i, pixels.Color(255, 0, 0));}
+         else {pixels.setPixelColor(i, pixels.Color(0, 255, 0));}
       }
    }
-   delay(500);
-   digitalWrite(onTargetA, LOW);
-   digitalWrite(onTargetB, LOW);
+   else if (currentMode == SABRE_MODE) {
+      for(int i=0; i<NUMPIXELS; i++) {
+         if (i < NUMPIXELS / 3) {pixels.setPixelColor(i, pixels.Color(255, 0, 0));}
+         else if (i < NUMPIXELS * 2 / 3) {pixels.setPixelColor(i, pixels.Color(0, 255, 0));}
+         else if {pixels.setPixelColor(i, pixels.Color(0, 0, 255));}
+      }
+   }
+   pixels.show();
+   
+   analogWrite(buzzerPin, 127);
+   delay(BUZZERTIME);
+   analogWrite(buzzerPin, 0);
+   
+   delay(LIGHTTIME - BUZZERTIME);
+   for(int i=0; i<NUMPIXELS; i++) {
+      if (i < NUMPIXELS / 2) {pixels.setPixelColor(i, pixels.Color(1, 0, 0));}
+      else {pixels.setPixelColor(i, pixels.Color(0, 1, 0));}
+   }
+   pixels.show();
+   
+//   if (currentMode == FOIL_MODE) {
+//      digitalWrite(onTargetA, HIGH);
+//   } else {
+//      if (currentMode == EPEE_MODE) {
+//        digitalWrite(onTargetB, HIGH);
+//      } else {
+//         if (currentMode == SABRE_MODE){
+//            digitalWrite(onTargetA, HIGH);
+//            digitalWrite(onTargetB, HIGH);
+//         }
+//      }
+//   }
+//   delay(500);
+//   digitalWrite(onTargetA, LOW);
+//   digitalWrite(onTargetB, LOW);
+
 }
 
 
@@ -448,19 +527,32 @@ void sabre() {
 void signalHits() {
    // non time critical, this is run after a hit has been detected
    if (lockedOut) {
-      digitalWrite(onTargetA,  hitOnTargA);
-      digitalWrite(offTargetA, hitOffTargA);
-      digitalWrite(offTargetB, hitOffTargB);
-      digitalWrite(onTargetB,  hitOnTargB);
-      digitalWrite(buzzerPin,  HIGH);
-#ifdef DEBUG
-      String serData = String("hitOnTargA  : ") + hitOnTargA  + "\n"
-                            + "hitOffTargA : "  + hitOffTargA + "\n"
-                            + "hitOffTargB : "  + hitOffTargB + "\n"
-                            + "hitOnTargB  : "  + hitOnTargB  + "\n"
-                            + "Locked Out  : "  + lockedOut   + "\n";
-      Serial.println(serData);
-#endif
+      
+      //digitalWrite(buzzerPin,  HIGH);
+      analogWrite(buzzerPin, 127);
+      
+      //digitalWrite(onTargetA,  hitOnTargA);
+      for(int i=0; i < (NUMPIXELS / 2); i++) {pixels.setPixelColor(i, pixels.Color(255, 0, 0));}
+      
+      //digitalWrite(onTargetB,  hitOnTargB);
+      for(int i = (NUMPIXELS / 2); i<NUMPIXELS; i++) {pixels.setPixelColor(i, pixels.Color(0, 255, 0));}
+      
+      //digitalWrite(offTargetA, hitOffTargA);
+      pixels.setPixelColor(0, pixels.Color(255, 255, 255));
+      
+      //digitalWrite(offTargetB, hitOffTargB);
+      pixels.setPixelColor(NUMPIXELS - 1, pixels.Color(255, 255, 255));
+
+      pixels.show();
+
+      #ifdef DEBUG
+         String serData = String("hitOnTargA  : ") + hitOnTargA  + "\n"
+                               + "hitOffTargA : "  + hitOffTargA + "\n"
+                               + "hitOffTargB : "  + hitOffTargB + "\n"
+                               + "hitOnTargB  : "  + hitOnTargB  + "\n"
+                               + "Locked Out  : "  + lockedOut   + "\n";
+         Serial.println(serData);
+      #endif
       resetValues();
    }
 }
@@ -470,15 +562,24 @@ void signalHits() {
 // Reset all variables
 //======================
 void resetValues() {
+   
    delay(BUZZERTIME);             // wait before turning off the buzzer
-   digitalWrite(buzzerPin,  LOW);
+   analogWrite(buzzerPin, 0);     //digitalWrite(buzzerPin,  LOW);
+   
    delay(LIGHTTIME-BUZZERTIME);   // wait before turning off the lights
-   digitalWrite(onTargetA,  LOW);
-   digitalWrite(offTargetA, LOW);
-   digitalWrite(offTargetB, LOW);
-   digitalWrite(onTargetB,  LOW);
-   digitalWrite(shortLEDA,  LOW);
-   digitalWrite(shortLEDB,  LOW);
+   
+   for(int i=0; i<NUMPIXELS; i++) {
+      if (i < NUMPIXELS / 2) {pixels.setPixelColor(i, pixels.Color(1, 0, 0));}
+      else {pixels.setPixelColor(i, pixels.Color(0, 1, 0));}
+   }
+   pixels.show();
+   
+   //digitalWrite(onTargetA,  LOW);
+   //digitalWrite(offTargetA, LOW);
+   //digitalWrite(offTargetB, LOW);
+   //digitalWrite(onTargetB,  LOW);
+   //digitalWrite(shortLEDA,  LOW);
+   //digitalWrite(shortLEDB,  LOW);
 
    lockedOut    = false;
    depressAtime = 0;
@@ -499,12 +600,25 @@ void resetValues() {
 // Test lights
 //==============
 void testLights() {
-   digitalWrite(offTargetA, HIGH);
-   digitalWrite(onTargetA,  HIGH);
-   digitalWrite(offTargetB, HIGH);
-   digitalWrite(onTargetB,  HIGH);
-   digitalWrite(shortLEDA,  HIGH);
-   digitalWrite(shortLEDB,  HIGH);
+   
+   //digitalWrite(onTargetA,  hitOnTargA);
+   for(int i=0; i < (NUMPIXELS / 2); i++) {pixels.setPixelColor(i, pixels.Color(255, 0, 0));}
+   
+   //digitalWrite(onTargetB,  hitOnTargB);
+   for(int i = (NUMPIXELS / 2); i<NUMPIXELS; i++) {pixels.setPixelColor(i, pixels.Color(0, 255, 0));}
+
+   //digitalWrite(offTargetA, hitOffTargA);
+   pixels.setPixelColor(0, pixels.Color(255, 255, 255));
+
+   //digitalWrite(offTargetB, hitOffTargB);
+   pixels.setPixelColor(NUMPIXELS - 1, pixels.Color(255, 255, 255));
+   
+   pixels.show();
+   
+   //digitalWrite(shortLEDA,  HIGH);
+   //digitalWrite(shortLEDB,  HIGH);
+   
    delay(1000);
    resetValues();
+   
 }
